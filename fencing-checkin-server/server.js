@@ -83,6 +83,25 @@ function currentStatusMap() {
   for (const e of data.log) { if (!(e.id in map)) map[e.id] = e; }
   return map;
 }
+function displayAction(a) { return a === 'dnc' ? 'D.N.C.' : a; }
+async function closeStaleOpenSessions() {
+  const today = new Date().toISOString().slice(0, 10);
+  const statusMap = currentStatusMap();
+  let changed = false;
+  for (const e of Object.values(statusMap)) {
+    if (e.action === 'in' && e.time.slice(0, 10) < today) {
+      const entry = { id: e.id, name: e.name, action: 'dnc', time: e.time.slice(0, 10) + 'T23:59:00.000Z', synced: false };
+      data.log.unshift(entry);
+      changed = true;
+    }
+  }
+  if (changed) {
+    await saveData();
+    for (const entry of data.log.filter(x => x.action === 'dnc' && !x.synced)) {
+      syncOneToSheets(entry).catch(() => {});
+    }
+  }
+}
 function requireCoach(req, res, next) {
   if (!data.coachPin) return res.status(403).json({ error: 'PIN not set yet' });
   if (req.headers['x-coach-pin'] !== data.coachPin) return res.status(401).json({ error: 'Invalid PIN' });
@@ -92,6 +111,7 @@ function requireCoach(req, res, next) {
 // ---------- public endpoints (fencer-facing) ----------
 app.get('/api/state', async (req, res) => {
   await ensureConfig();
+  await closeStaleOpenSessions();
   res.json({
     roster: data.roster,
     log: data.log.slice(0, 500),
@@ -113,6 +133,7 @@ app.get('/api/qr.svg', async (req, res) => {
 
 app.post('/api/checkin', async (req, res) => {
   await ensureConfig();
+  await closeStaleOpenSessions();
   const { name, code } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ ok: false, msg: 'Enter your name.' });
   if (!isValidCode(String(code || '').trim())) return res.status(400).json({ ok: false, msg: 'Incorrect or expired code.' });
@@ -187,7 +208,7 @@ async function syncOneToSheets(entry) {
     const r = await fetch(data.sheetsWebAppUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: entry.name, action: entry.action, time: entry.time })
+      body: JSON.stringify({ name: entry.name, action: displayAction(entry.action), time: entry.time })    
     });
     if (r.ok) { entry.synced = true; await saveData(); }
   } catch (e) { /* offline right now — will retry on next check-in or manual sync */ }
@@ -201,7 +222,7 @@ async function syncAllToSheets() {
       const r = await fetch(data.sheetsWebAppUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: entry.name, action: entry.action, time: entry.time })
+        body: JSON.stringify({ name: entry.name, action: displayAction(entry.action), time: entry.time })
       });
       if (r.ok) { entry.synced = true; sent++; } else break;
     } catch (e) { break; }

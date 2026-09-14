@@ -42,13 +42,18 @@ function renderFencer() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const tile = f => {
-    const st = statusMap[f.id]?.action === 'in' ? 'in' : 'out';
-    const t = statusMap[f.id]?.time;
+    const s = statusMap[f.id];
+    const st = s?.action === 'in' ? 'in' : 'out';
+    const t = s?.time;
+    let timeLabel = 'not checked in yet';
+    if (st === 'in') timeLabel = 'in since ' + fmtTime(t);
+    else if (s?.action === 'dnc') timeLabel = 'D.N.C. · ' + new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    else if (t) timeLabel = 'out · ' + fmtTime(t);
     return `<div class="tile ${st}" data-name="${f.name.replace(/"/g, '&quot;')}">
       <div class="light"></div>
       <div class="tile-info">
         <div class="tile-name">${f.name}</div>
-        <div class="tile-time">${st === 'in' ? 'in since ' + fmtTime(t) : (t ? 'out · ' + fmtTime(t) : 'not checked in yet')}</div>
+        <div class="tile-time">${timeLabel}</div>
       </div>
     </div>`;
   };
@@ -154,12 +159,13 @@ async function renderCoach() {
   const byFencer = {};
   for (const e of events) { byFencer[e.id] = byFencer[e.id] || { name: e.name, events: [] }; byFencer[e.id].events.push(e); }
   const rows = Object.entries(byFencer).map(([id, d]) => {
-    let totalMs = 0, lastIn = null, lastOut = null, openIn = null;
+    let totalMs = 0, lastIn = null, lastOutTime = null, lastOutType = null, openIn = null;
     for (const e of d.events) {
       if (e.action === 'in') { openIn = e.time; lastIn = e.time; }
-      else if (e.action === 'out') { lastOut = e.time; if (openIn) { totalMs += new Date(e.time) - new Date(openIn); openIn = null; } }
+      else if (e.action === 'out') { lastOutTime = e.time; lastOutType = 'out'; if (openIn) { totalMs += new Date(e.time) - new Date(openIn); openIn = null; } }
+      else if (e.action === 'dnc') { lastOutTime = e.time; lastOutType = 'dnc'; openIn = null; }
     }
-    return { id, name: d.name, stillIn: statusMap[id]?.action === 'in', lastIn, lastOut, mins: Math.round(totalMs / 60000) };
+    return { id, name: d.name, stillIn: statusMap[id]?.action === 'in', lastIn, lastOutTime, lastOutType, mins: Math.round(totalMs / 60000) };
   }).sort((a, b) => a.name.localeCompare(b.name));
 
   const pendingCount = fullLog.filter(e => !e.synced).length;
@@ -286,7 +292,7 @@ async function renderCoach() {
   };
   document.getElementById('dateInput').onchange = (e) => { coachSelectedDate = e.target.value; renderCoach(); };
   document.getElementById('csvBtn').onclick = () => {
-    const rows2 = [['Name', 'Action', 'Time']].concat(events.map(e => [e.name, e.action, e.time]));
+    const rows2 = [['Name', 'Action', 'Time']].concat(events.map(e => [e.name, e.action === 'dnc' ? 'D.N.C.' : e.action, e.time]));
     const csv = rows2.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -303,7 +309,7 @@ async function renderCoach() {
         <td>${r.name}</td>
         <td><span class="status-pill ${r.stillIn ? 'in' : 'out'}"><span class="light"></span>${r.stillIn ? 'On strip' : 'Off strip'}</span></td>
         <td class="mono">${r.lastIn ? fmtTime(r.lastIn) : '—'}</td>
-        <td class="mono">${r.lastOut ? fmtTime(r.lastOut) : '—'}</td>
+        <td class="mono">${r.lastOutType === 'dnc' ? 'D.N.C.' : (r.lastOutTime ? fmtTime(r.lastOutTime) : '—')}</td>
         <td class="mono">${r.mins ? r.mins + ' min' : (r.stillIn ? 'in progress' : '—')}</td>
         <td><span class="remove-x" data-id="${r.id}" title="Remove from roster">×</span></td>
       </tr>`).join('') || `<tr><td colspan="6" class="empty">No events for this day yet.</td></tr>`;
@@ -313,7 +319,7 @@ async function renderCoach() {
   document.getElementById('filterInput').addEventListener('input', (e) => renderRows(e.target.value));
 
   document.getElementById('logList').innerHTML = events.slice().reverse().slice(0, 80).map(e =>
-    `<div class="log-entry"><span class="t">${fmtDateTime(e.time)}</span><span class="${e.action === 'in' ? 'a-in' : 'a-out'}">${e.name} checked ${e.action}</span></div>`
+    `<div class="log-entry"><span class="t">${fmtDateTime(e.time)}</span><span class="${e.action === 'in' ? 'a-in' : (e.action === 'dnc' ? 'a-dnc' : 'a-out')}">${e.name} checked ${e.action === 'dnc' ? 'D.N.C.' : e.action}</span></div>`
   ).join('') || '<div class="empty">Nothing logged for this day.</div>';
 }
 
