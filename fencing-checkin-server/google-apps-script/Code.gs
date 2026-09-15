@@ -22,10 +22,18 @@ function doPost(e) {
   // Add a header row once, if the sheet is empty.
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(['Name', 'Action', 'Time']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1, 3, 160);
   }
 
   var data = JSON.parse(e.postData.contents);
   sheet.appendRow([data.name, data.action, data.time]);
+
+  // Highlight D.N.C. rows so they stand out from normal check-outs at a glance.
+  if (data.action === 'D.N.C.') {
+    sheet.getRange(sheet.getLastRow(), 1, 1, 3).setFontColor('#C9A227').setFontWeight('bold');
+  }
 
   return ContentService
     .createTextOutput(JSON.stringify({ ok: true }))
@@ -39,12 +47,40 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// Adds a "Fencing Attendance" menu with a button to (re)build the Weekly Summary tab.
+// Adds a "Fencing Attendance" menu with buttons to (re)build the Weekly Summary tab
+// and to apply header/highlight formatting to a Log tab that predates this script.
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Fencing Attendance')
     .addItem('Refresh Weekly Summary', 'generateWeeklySummary')
+    .addItem('Format Log tab', 'formatLogSheet')
     .addToUi();
+}
+
+// One-time (or run-anytime) formatting pass over the existing "Log" tab: bolds and
+// freezes the header row, sets readable column widths, and highlights any D.N.C. rows
+// gold. New rows appended by doPost are already formatted as they're written — this is
+// only needed to catch up rows that were added before this formatting existed.
+function formatLogSheet() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+  if (!sheet || sheet.getLastRow() === 0) {
+    SpreadsheetApp.getUi().alert('No Log tab (or no rows) to format yet.');
+    return;
+  }
+  sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidths(1, 3, 160);
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var actions = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    actions.forEach(function (row, i) {
+      var rowIndex = i + 2;
+      var isDnc = row[0] === 'D.N.C.';
+      var range = sheet.getRange(rowIndex, 1, 1, 3);
+      range.setFontColor(isDnc ? '#C9A227' : null).setFontWeight(isDnc ? 'bold' : null);
+    });
+  }
 }
 
 /**
