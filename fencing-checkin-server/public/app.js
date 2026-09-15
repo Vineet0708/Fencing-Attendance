@@ -377,7 +377,13 @@ async function init() {
   await refreshState();
   render();
   pollTimer = setInterval(async () => {
-    if (mode === 'fencer') { await refreshState(); renderFencer(); }
+    if (mode !== 'fencer') return;
+    const nameInput = document.getElementById('fName');
+    const codeInput = document.getElementById('fCode');
+    const active = document.activeElement;
+    const isTyping = active === nameInput || active === codeInput || (nameInput && nameInput.value) || (codeInput && codeInput.value);
+    if (isTyping) return;
+    await refreshState(); renderFencer();
   }, 4000);
 }
 init();
