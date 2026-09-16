@@ -35,6 +35,9 @@ function doPost(e) {
     sheet.getRange(sheet.getLastRow(), 1, 1, 3).setFontColor('#C9A227').setFontWeight('bold');
   }
 
+  // Keep the Weekly Summary tab live — rebuilt from the Log on every check-in/out.
+  generateWeeklySummary();
+
   return ContentService
     .createTextOutput(JSON.stringify({ ok: true }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -52,9 +55,19 @@ function doGet(e) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Fencing Attendance')
-    .addItem('Refresh Weekly Summary', 'generateWeeklySummary')
+    .addItem('Refresh Weekly Summary', 'refreshWeeklySummaryFromMenu')
     .addItem('Format Log tab', 'formatLogSheet')
     .addToUi();
+}
+
+// Weekly Summary already rebuilds itself on every check-in/out (see doPost); this just
+// also jumps you to the tab so a manual click shows the result, which the automatic
+// background rebuild deliberately doesn't do (so it doesn't yank the sheet view around
+// on you while you're looking at something else).
+function refreshWeeklySummaryFromMenu() {
+  generateWeeklySummary();
+  var out = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Weekly Summary');
+  if (out) SpreadsheetApp.getActiveSpreadsheet().setActiveSheet(out);
 }
 
 // One-time (or run-anytime) formatting pass over the existing "Log" tab: bolds and
@@ -95,9 +108,12 @@ function generateWeeklySummary() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var logSheet = ss.getSheetByName('Log');
   if (!logSheet || logSheet.getLastRow() < 2) {
-    SpreadsheetApp.getUi().alert('No check-in data yet — nothing to summarize.');
+    // getUi() only works when a person is running this from the menu — doPost has no UI
+    // to attach an alert to, and would throw here otherwise.
+    try { SpreadsheetApp.getUi().alert('No check-in data yet — nothing to summarize.'); } catch (uiErr) {}
     return;
   }
+  var previousActiveName = ss.getActiveSheet().getName();
   var tz = Session.getScriptTimeZone();
   var rows = logSheet.getDataRange().getValues();
   rows.shift(); // drop header row
@@ -177,4 +193,12 @@ function generateWeeklySummary() {
   out.setFrozenRows(1);
   out.setFrozenColumns(1);
   if (fencers.length) out.autoResizeColumns(1, header.length);
+
+  // Rebuilding "Weekly Summary" from scratch switches the active tab to it — restore
+  // whatever tab was actually open (e.g. "Log") so an automatic rebuild triggered by
+  // someone else's check-in doesn't yank the coach's current view around.
+  try {
+    var toRestore = ss.getSheetByName(previousActiveName);
+    if (toRestore) ss.setActiveSheet(toRestore);
+  } catch (activeErr) {}
 }
