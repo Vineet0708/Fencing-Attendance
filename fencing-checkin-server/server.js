@@ -85,11 +85,17 @@ function currentStatusMap() {
 }
 function displayAction(a) { return a === 'dnc' ? 'D.N.C.' : a; }
 async function closeStaleOpenSessions() {
-  const today = new Date().toISOString().slice(0, 10);
+  // Comparing UTC calendar dates here used to close out everyone still checked in the
+  // moment UTC rolled over — which happens mid-evening, not at local midnight, so it
+  // could mass-D.N.C. an entire room mid-practice. Using elapsed time instead sidesteps
+  // timezones entirely: nothing gets closed until it's been open far longer than any
+  // real practice, however late it runs or whatever timezone the club is in.
+  const staleMs = (Number(process.env.STALE_SESSION_HOURS) || 6) * 60 * 60 * 1000;
+  const now = Date.now();
   const statusMap = currentStatusMap();
   let changed = false;
   for (const e of Object.values(statusMap)) {
-    if (e.action === 'in' && e.time.slice(0, 10) < today) {
+    if (e.action === 'in' && now - new Date(e.time).getTime() > staleMs) {
       const entry = { id: e.id, name: e.name, action: 'dnc', time: e.time.slice(0, 10) + 'T23:59:00.000Z', synced: false };
       data.log.unshift(entry);
       changed = true;
