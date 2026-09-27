@@ -169,6 +169,13 @@ app.post('/api/coach/setup-pin', async (req, res) => {
 app.post('/api/coach/login', (req, res) => {
   res.json({ ok: (req.body || {}).pin === data.coachPin, hasPin: !!data.coachPin });
 });
+app.post('/api/coach/change-pin', requireCoach, async (req, res) => {
+  const { newPin } = req.body || {};
+  if (!newPin || !newPin.trim()) return res.status(400).json({ error: 'New PIN required' });
+  data.coachPin = newPin.trim();
+  await saveData();
+  res.json({ ok: true });
+});
 app.get('/api/coach/full-log', requireCoach, (req, res) => res.json({ log: data.log }));
 app.post('/api/coach/config', requireCoach, async (req, res) => {
   await ensureConfig();
