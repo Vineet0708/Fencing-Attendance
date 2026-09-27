@@ -203,6 +203,16 @@ async function renderCoach() {
       <div class="sync-status" id="syncStatus"></div>
     </div>
 
+    <div class="sheets-panel">
+      <div class="section-label" style="margin:0 0 4px"><span class="dot" style="background:var(--gold)"></span>Coach PIN</div>
+      <div class="note" style="font-size:12px;color:var(--text-faint)">Changing it signs out anyone using the old PIN on another device — they'll need the new one to get back in.</div>
+      <div class="row">
+        <input type="text" id="newPinInput" maxlength="6" inputmode="numeric" placeholder="New PIN">
+        <button id="changePinBtn">Change PIN</button>
+      </div>
+      <div class="sync-status" id="pinStatus"></div>
+    </div>
+
     <div class="add-fencer-row">
       <input id="newFencerName" placeholder="Add a fencer to the roster…">
       <button id="addFencerBtn">Add</button>
@@ -282,6 +292,21 @@ async function renderCoach() {
     document.getElementById('syncStatus').textContent = 'Syncing…';
     const { body } = await api('/api/coach/sync-sheets', { method: 'POST', headers: coachHeaders() });
     document.getElementById('syncStatus').textContent = body.ok ? `Synced ${body.sent} event(s). ${body.remaining} still pending.` : (body.msg || 'Sync failed.');
+  };
+
+  document.getElementById('changePinBtn').onclick = async () => {
+    const pinStatus = document.getElementById('pinStatus');
+    const newPin = document.getElementById('newPinInput').value.trim();
+    if (!newPin) { pinStatus.textContent = 'Enter a new PIN first.'; return; }
+    const { ok, body } = await api('/api/coach/change-pin', { method: 'POST', headers: coachHeaders(), body: JSON.stringify({ newPin }) });
+    if (ok) {
+      coachPin = newPin;
+      localStorage.setItem('coachPin', newPin);
+      document.getElementById('newPinInput').value = '';
+      pinStatus.textContent = 'PIN changed.';
+    } else {
+      pinStatus.textContent = body.error || 'Could not change PIN.';
+    }
   };
 
   document.getElementById('addFencerBtn').onclick = async () => {
