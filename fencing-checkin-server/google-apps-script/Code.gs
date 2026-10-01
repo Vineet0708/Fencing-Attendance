@@ -5,10 +5,16 @@
  * Every check-in/out event from the tablet server gets appended as a new row.
  */
 
-// How many minutes after the earliest check-in of the day counts as "late" for that day.
-// There's no concept of a scheduled practice start time in the app, so "late" is relative
-// to whoever else showed up that day, not a fixed clock time. Tune as needed.
-var LATE_THRESHOLD_MINUTES = 10;
+// Practice start, in the Apps Script project's time zone (Project Settings > Time zone).
+// Any first check-in after this is marked late by the number of minutes after it.
+var PRACTICE_START_HOUR = 20; // 24-hour clock: 20 = 8 PM
+var PRACTICE_START_MINUTE = 0;
+
+// A week counts toward the weekly requirement if the fencer attended at least this many
+// practices in it (Monday-start weeks).
+var WEEKLY_PRACTICES_REQUIRED = 2;
+
+var SETTINGS_SHEET = 'Semester Settings';
 
 function doPost(e) {
   // If this runs with no real request (e.g. you clicked "Run" in the editor to test
@@ -45,7 +51,7 @@ function doPost(e) {
   // check-in/out. Only the semester this event falls in gets rebuilt, so past, finished
   // semesters' tabs are never touched (and don't slow down as the season goes on).
   var tz = Session.getScriptTimeZone();
-  generateAttendanceSheet(semesterKeyOf(new Date(data.time), tz));
+  generateAttendanceSheet(semesterKeyOfDay(Utilities.formatDate(new Date(data.time), tz, 'yyyy-MM-dd')));
 
   return ContentService
     .createTextOutput(JSON.stringify({ ok: true }))
@@ -96,14 +102,82 @@ function formatLogSheet() {
   }
 }
 
-// Fall = Aug-Dec, Spring = Jan-May, Summer = Jun-Jul. Adjust here if your school's terms
-// don't line up with this.
-function semesterKeyOf(date, tz) {
-  var month = Number(Utilities.formatDate(date, tz, 'M'));
-  var year = Number(Utilities.formatDate(date, tz, 'yyyy'));
+// Fall = Aug-Dec, Spring = Jan-May, Summer = Jun-Jul, from a 'yyyy-MM-dd' day key.
+// Adjust here if your school's terms don't line up with this.
+function semesterKeyOfDay(dayKey) {
+  var year = Number(dayKey.slice(0, 4));
+  var month = Number(dayKey.slice(5, 7));
   if (month >= 8) return 'Fall ' + year;
   if (month <= 5) return 'Spring ' + year;
   return 'Summer ' + year;
+}
+
+// Monday of the week containing dayKey, as 'yyyy-MM-dd'. Pure date math, so it can't be
+// thrown off by the script's timezone.
+function mondayOf(dayKey) {
+  var d = new Date(dayKey + 'T00:00:00Z');
+  var shift = d.getUTCDay() === 0 ? -6 : 1 - d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() + shift);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Reads every valid Log row and assigns each one the local calendar day it belongs to.
+ * A D.N.C. row is attributed to the day of that fencer's most recent check-in rather than
+ * its own timestamp: the server stamps D.N.C. at 23:59 UTC, which is the NEXT local day
+ * for an evening practice in the Americas, and would otherwise land on the wrong date.
+ */
+function readLogEvents(tz) {
+  var logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+  if (!logSheet || logSheet.getLastRow() < 2) return [];
+  var rows = logSheet.getDataRange().getValues();
+  rows.shift(); // drop header row
+
+  var events = rows
+    .map(function (r) { return { name: String(r[0]).trim(), action: String(r[1]).trim(), time: new Date(r[2]) }; })
+    .filter(function (ev) { return ev.name && ev.action && !isNaN(ev.time.getTime()); })
+    .sort(function (a, b) { return a.time - b.time; });
+
+  var lastInDayByName = {};
+  events.forEach(function (ev) {
+    var ownDay = Utilities.formatDate(ev.time, tz, 'yyyy-MM-dd');
+    if (ev.action === 'D.N.C.') {
+      ev.dayKey = lastInDayByName[ev.name] || ownDay;
+    } else {
+      ev.dayKey = ownDay;
+      if (ev.action === 'in') lastInDayByName[ev.name] = ownDay;
+    }
+  });
+  return events;
+}
+
+/**
+ * Reads the per-semester targets you type into the "Semester Settings" tab. Creates the
+ * tab, and a blank row for any semester not listed yet, so there's always a place to fill
+ * them in. Blank cells come back as null.
+ */
+function getSemesterSettings(semesterKey) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SETTINGS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SETTINGS_SHEET);
+    sheet.appendRow(['Semester', 'Required practices', 'Mandatory weeks']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1, 3, 170);
+  }
+  var values = sheet.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]).trim() === semesterKey) {
+      var practices = Number(values[i][1]), weeks = Number(values[i][2]);
+      return {
+        requiredPractices: values[i][1] !== '' && practices > 0 ? practices : null,
+        mandatoryWeeks: values[i][2] !== '' && weeks > 0 ? weeks : null
+      };
+    }
+  }
+  sheet.appendRow([semesterKey, '', '']);
+  return { requiredPractices: null, mandatoryWeeks: null };
 }
 
 // Rebuilds the tab for whichever semester "today" falls in, and jumps you to it. The
@@ -111,7 +185,7 @@ function semesterKeyOf(date, tz) {
 // tab, so use this when you want to manually jump over and look.
 function refreshCurrentSemesterAttendance() {
   var tz = Session.getScriptTimeZone();
-  var key = semesterKeyOf(new Date(), tz);
+  var key = semesterKeyOfDay(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd'));
   generateAttendanceSheet(key);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var out = ss.getSheetByName(key);
@@ -119,209 +193,162 @@ function refreshCurrentSemesterAttendance() {
 }
 
 // Scans the whole Log for every semester that appears in it and (re)builds a tab for
-// each. Use this once after pasting this script in for the first time, to backfill
-// attendance sheets for data that already existed before this feature did.
+// each. Use this after pasting the script in, after editing the Log by hand, or after
+// changing numbers in the "Semester Settings" tab.
 function rebuildAllAttendanceSheets() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var logSheet = ss.getSheetByName('Log');
-  if (!logSheet || logSheet.getLastRow() < 2) {
+  var events = readLogEvents(Session.getScriptTimeZone());
+  if (!events.length) {
     try { SpreadsheetApp.getUi().alert('No check-in data yet — nothing to build.'); } catch (uiErr) {}
     return;
   }
-  var tz = Session.getScriptTimeZone();
-  var rows = logSheet.getDataRange().getValues();
-  rows.shift();
-
   var semesters = {};
-  rows.forEach(function (r) {
-    var t = new Date(r[2]);
-    if (!r[0] || !r[1] || isNaN(t.getTime())) return;
-    semesters[semesterKeyOf(t, tz)] = true;
-  });
+  events.forEach(function (ev) { semesters[semesterKeyOfDay(ev.dayKey)] = true; });
   Object.keys(semesters).forEach(function (key) { generateAttendanceSheet(key); });
 }
 
+function fmtHours(ms) { return (Math.round(ms / 36000) / 100) + ' hrs'; }
+function ratioLabel(n, d) { return d ? n + '/' + d + ' (' + Math.round((n / d) * 100) + '%)' : String(n); }
+
 /**
- * Rebuilds ONE semester's attendance tab (named after the semester, e.g. "Fall 2026")
- * from the raw "Log" sheet: one row per fencer, one column per practice date that had
- * at least one check-in, color-coded:
- *   green  "123min"              — attended, on time
- *   amber  "Check in late - Nmin" — checked in more than LATE_THRESHOLD_MINUTES after
- *                                   the earliest check-in recorded that day
- *   amber  "No Check Out"        — checked in but never checked out (closes as D.N.C.)
- *   red    "0min"                — checked in/out but the computed time on the strip was
- *                                   zero; counts as a missed practice
- *   red    (blank)                — no record for that fencer on that date at all
- * Plus rollup columns: total minutes; counts of missed / late / not-signed-out days;
- * fraction/percent of practices attended; how many Monday-start weeks (of those with at
- * least one practice this semester) the fencer attended 2 or more practices in, both as
- * a raw count and as a fraction/percent of all such weeks in the semester.
+ * Rebuilds ONE semester's attendance tab (named after the semester, e.g. "Fall 2026"):
+ * one row per fencer, one column per practice date (any day with at least one check-in),
+ * color-coded:
+ *   green  "1.75 hrs"         — attended, on time
+ *   green  "In progress"      — checked in today and not out yet
+ *   amber  "24 min late"      — first check-in after the practice start time
+ *   amber  "No Check Out"     — checked in but never checked out that day
+ *   red    "0 hrs"            — checked out less than a minute after checking in (a
+ *                               double-tap); not counted as attended
+ *   red    (blank)            — no record that day
+ * There's one practice a day, so a day's time is first check-in to LAST check-out. Extra
+ * out/in/out scans at the end of practice are absorbed, and a stray check-in after the
+ * fencer already checked out doesn't count as a missing checkout.
  *
- * Only fencers with at least one Log entry in this semester appear — a fencer who never
- * checked in even once won't show up, since the Log (and this script) never receives a
- * full roster, only individual check-in/out events.
+ * Only fencers with at least one Log entry in this semester appear — the Log never
+ * receives the full roster, only individual check-in/out events.
  */
 function generateAttendanceSheet(semesterKey) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var logSheet = ss.getSheetByName('Log');
-  if (!logSheet || logSheet.getLastRow() < 2) return;
-
   var tz = Session.getScriptTimeZone();
+  var events = readLogEvents(tz).filter(function (ev) { return semesterKeyOfDay(ev.dayKey) === semesterKey; });
+  if (!events.length) return;
+
   var previousActiveName = ss.getActiveSheet().getName();
+  var settings = getSemesterSettings(semesterKey);
+  var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 
-  var rows = logSheet.getDataRange().getValues();
-  rows.shift(); // drop header row
-
-  function dayKeyOf(d) { return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
-  function mondayOf(dayKey) {
-    var d = new Date(dayKey + 'T00:00:00');
-    var shift = (d.getDay() === 0 ? -6 : 1 - d.getDay());
-    d.setDate(d.getDate() + shift);
-    return dayKeyOf(d);
-  }
-
-  var semesterRows = rows
-    .map(function (r) { return { name: r[0], action: String(r[1]), time: new Date(r[2]) }; })
-    .filter(function (r) {
-      return r.name && r.action && !isNaN(r.time.getTime()) && semesterKeyOf(r.time, tz) === semesterKey;
-    });
-  if (!semesterRows.length) return;
-
-  // Distinct practice dates (any day with >=1 event) and fencers, both sorted.
+  // Distinct practice dates and fencers, both sorted.
   var dateSet = {}, fencerSet = {};
-  semesterRows.forEach(function (r) {
-    dateSet[dayKeyOf(r.time)] = true;
-    fencerSet[r.name] = true;
-  });
+  events.forEach(function (ev) { dateSet[ev.dayKey] = true; fencerSet[ev.name] = true; });
   var dates = Object.keys(dateSet).sort();
   var fencers = Object.keys(fencerSet).sort();
+  var weeksWithPractice = dates.map(mondayOf)
+    .filter(function (w, i, arr) { return arr.indexOf(w) === i; });
 
-  // Every Monday-start week that had at least one practice date this semester — the
-  // denominator for the "weeks with 2+ practices" fraction below.
-  var weeksInSemester = dates.map(mondayOf)
-    .filter(function (w, i, arr) { return arr.indexOf(w) === i; })
-    .sort();
+  // Fall back to what's actually been held when no target is set in Semester Settings.
+  var practiceTarget = settings.requiredPractices || dates.length;
+  var weekTarget = settings.mandatoryWeeks || weeksWithPractice.length;
 
-  // Earliest "in" of each date across the whole roster — that date's practice start.
-  var teamStartByDate = {};
-  semesterRows.forEach(function (r) {
-    if (r.action !== 'in') return;
-    var dk = dayKeyOf(r.time);
-    if (!teamStartByDate[dk] || r.time < teamStartByDate[dk]) teamStartByDate[dk] = r.time;
-  });
+  var practiceStartSec = PRACTICE_START_HOUR * 3600 + PRACTICE_START_MINUTE * 60;
+  function minutesLate(time) {
+    var hms = Utilities.formatDate(time, tz, 'HH:mm:ss').split(':').map(Number);
+    var lateSec = hms[0] * 3600 + hms[1] * 60 + hms[2] - practiceStartSec;
+    return lateSec > 0 ? Math.ceil(lateSec / 60) : 0;
+  }
 
-  // Group each fencer's rows by date.
+  // Group each fencer's events by date (already in time order from readLogEvents).
   var byFencerDate = {};
-  semesterRows.forEach(function (r) {
-    var dk = dayKeyOf(r.time);
-    byFencerDate[r.name] = byFencerDate[r.name] || {};
-    byFencerDate[r.name][dk] = byFencerDate[r.name][dk] || [];
-    byFencerDate[r.name][dk].push(r);
+  events.forEach(function (ev) {
+    byFencerDate[ev.name] = byFencerDate[ev.name] || {};
+    (byFencerDate[ev.name][ev.dayKey] = byFencerDate[ev.name][ev.dayKey] || []).push(ev);
   });
 
   var out = ss.getSheetByName(semesterKey);
   if (out) ss.deleteSheet(out);
   out = ss.insertSheet(semesterKey);
 
-  out.getRange(1, 1).setValue('Total # of practices this semester:');
-  out.getRange(1, 2).setValue(dates.length).setFontWeight('bold');
+  out.getRange(1, 1, 2, 4).setValues([
+    ['Practices held so far:', dates.length, 'Required practices this semester:',
+      settings.requiredPractices || 'not set — fill in "' + SETTINGS_SHEET + '" tab'],
+    ['Weeks with practice so far:', weeksWithPractice.length, 'Mandatory weeks this semester:',
+      settings.mandatoryWeeks || 'not set — fill in "' + SETTINGS_SHEET + '" tab']
+  ]);
+  out.getRange(1, 1, 2, 4).setFontWeight('bold');
 
-  var HEADER_ROW = 3;
-  var baseHeader = ['Fencer', 'Total Time On The Strip (minutes)', 'Total # of missed practices',
-    'Total # of late practices', 'Total # of not signed out practices/left early',
-    'Practices Attended (fraction/%)', 'Weeks with 2+ Practices', 'Weeks with 2+ Practices (fraction/%)'];
-  var FIRST_DATE_COL = baseHeader.length + 1; // 1-indexed column where date columns start
+  var HEADER_ROW = 4;
+  var baseHeader = ['Fencer', 'Total Time On The Strip (hours)', 'Practices attended',
+    'Practices attended / required', 'Total # of late practices',
+    'Total # of not signed out practices/left early',
+    'Weeks with ' + WEEKLY_PRACTICES_REQUIRED + '+ practices', 'Weeks with ' + WEEKLY_PRACTICES_REQUIRED + '+ practices / mandatory'];
+  var FIRST_DATE_COL = baseHeader.length + 1;
   var header = baseHeader.concat(dates.map(function (dk) {
-    return Utilities.formatDate(new Date(dk + 'T12:00:00'), tz, 'MMM d');
+    return Utilities.formatDate(new Date(dk + 'T12:00:00Z'), 'UTC', 'MMM d');
   }));
-  out.getRange(HEADER_ROW, 1, 1, header.length).setValues([header]).setFontWeight('bold');
+  out.getRange(HEADER_ROW, 1, 1, header.length).setValues([header]).setFontWeight('bold').setWrap(true);
   out.setFrozenRows(HEADER_ROW);
   out.setFrozenColumns(1);
 
   var GREEN = '#93C47D', RED = '#E06666', AMBER = '#F1C232';
 
-  fencers.forEach(function (name, fi) {
-    var rowIndex = HEADER_ROW + 1 + fi;
-    var totalMinutes = 0, missed = 0, late = 0, noCheckout = 0;
+  var rowsOut = [], colorsOut = [];
+  fencers.forEach(function (name) {
+    var totalMs = 0, attended = 0, late = 0, noCheckout = 0;
+    var attendedByWeek = {};
     var dateValues = [], dateColors = [];
 
     dates.forEach(function (dk) {
-      var events = ((byFencerDate[name] || {})[dk] || []).slice()
-        .sort(function (a, b) { return a.time - b.time; });
+      var dayEvents = (byFencerDate[name] || {})[dk] || [];
+      var firstIn = null, lastOut = null;
+      dayEvents.forEach(function (ev) {
+        if (ev.action === 'in' && !firstIn) firstIn = ev.time;
+        else if (ev.action === 'out' && firstIn) lastOut = ev.time;
+      });
 
-      if (!events.length) {
-        missed++;
+      if (!firstIn) {
         dateValues.push('');
         dateColors.push(RED);
         return;
       }
 
-      var openIn = null, firstIn = null, totalMs = 0, hasDnc = false;
-      events.forEach(function (ev) {
-        if (ev.action === 'in') {
-          openIn = ev.time;
-          if (!firstIn) firstIn = ev.time;
-        } else if (ev.action === 'out') {
-          if (openIn) { totalMs += ev.time - openIn; openIn = null; }
-        } else if (ev.action === 'D.N.C.') {
-          hasDnc = true;
-          openIn = null;
-        }
-      });
-
-      if (hasDnc) {
-        noCheckout++;
-        dateValues.push('No Check Out');
-        dateColors.push(AMBER);
-        return;
-      }
-      if (totalMs <= 0) {
-        missed++;
-        dateValues.push('0min');
+      var dayMs = lastOut ? lastOut - firstIn : 0;
+      if (lastOut && dayMs < 60000) {
+        dateValues.push('0 hrs');
         dateColors.push(RED);
         return;
       }
+      // Never checked out: still practicing if it's today, otherwise a missing checkout.
+      var missingCheckout = !lastOut && dk < todayKey;
+      var inProgress = !lastOut && dk >= todayKey;
 
-      var minutes = Math.round(totalMs / 60000);
-      var teamStart = teamStartByDate[dk];
-      var latenessMin = teamStart ? Math.round((firstIn - teamStart) / 60000) : 0;
-      if (latenessMin > LATE_THRESHOLD_MINUTES) {
-        late++;
-        totalMinutes += minutes;
-        dateValues.push('Check in late - ' + latenessMin + 'min');
-        dateColors.push(AMBER);
-      } else {
-        totalMinutes += minutes;
-        dateValues.push(minutes + 'min');
-        dateColors.push(GREEN);
-      }
-    });
-
-    // Weekly attendance rollups. A date counts as "attended" if it isn't colored red —
-    // red is used only for a true miss (no record) and a 0min session, both of which
-    // already fed into `missed` above.
-    var attendedByWeek = {};
-    dates.forEach(function (dk, di) {
-      var attended = dateColors[di] !== RED;
+      attended++;
+      totalMs += dayMs;
       var wk = mondayOf(dk);
-      attendedByWeek[wk] = (attendedByWeek[wk] || 0) + (attended ? 1 : 0);
+      attendedByWeek[wk] = (attendedByWeek[wk] || 0) + 1;
+
+      var parts = [];
+      var lateMin = minutesLate(firstIn);
+      if (lateMin > 0) { late++; parts.push(lateMin + ' min late'); }
+      if (missingCheckout) { noCheckout++; parts.push('No Check Out'); }
+      if (!parts.length) parts.push(inProgress ? 'In progress' : fmtHours(dayMs));
+      dateValues.push(parts.join(' · '));
+      dateColors.push(lateMin > 0 || missingCheckout ? AMBER : GREEN);
     });
-    var weeksMet = weeksInSemester.filter(function (wk) { return (attendedByWeek[wk] || 0) >= 2; }).length;
-    var totalWeeks = weeksInSemester.length;
-    var attendedCount = dates.length - missed;
-    var practicesPct = dates.length ? Math.round((attendedCount / dates.length) * 100) : 0;
-    var weeksPct = totalWeeks ? Math.round((weeksMet / totalWeeks) * 100) : 0;
-    var practicesLabel = attendedCount + '/' + dates.length + ' (' + practicesPct + '%)';
-    var weeksLabel = weeksMet + '/' + totalWeeks + ' (' + weeksPct + '%)';
 
-    var row = [name, totalMinutes, missed, late, noCheckout, practicesLabel, weeksMet, weeksLabel].concat(dateValues);
-    out.getRange(rowIndex, 1, 1, row.length).setValues([row]);
-    out.getRange(rowIndex, 1).setFontWeight('bold');
+    var weeksMet = Object.keys(attendedByWeek).filter(function (wk) {
+      return attendedByWeek[wk] >= WEEKLY_PRACTICES_REQUIRED;
+    }).length;
 
-    var dateRange = out.getRange(rowIndex, FIRST_DATE_COL, 1, dates.length);
-    dateRange.setBackgrounds([dateColors]);
-    dateRange.setFontColor('#ffffff').setFontWeight('bold').setHorizontalAlignment('center');
+    rowsOut.push([name, Math.round(totalMs / 36000) / 100, attended, ratioLabel(attended, practiceTarget),
+      late, noCheckout, weeksMet, ratioLabel(weeksMet, weekTarget)].concat(dateValues));
+    colorsOut.push(dateColors);
   });
+
+  var firstDataRow = HEADER_ROW + 1;
+  out.getRange(firstDataRow, 1, rowsOut.length, header.length).setValues(rowsOut);
+  out.getRange(firstDataRow, 1, rowsOut.length, 1).setFontWeight('bold');
+  var dateBlock = out.getRange(firstDataRow, FIRST_DATE_COL, rowsOut.length, dates.length);
+  dateBlock.setBackgrounds(colorsOut);
+  dateBlock.setFontColor('#ffffff').setFontWeight('bold').setHorizontalAlignment('center');
 
   out.autoResizeColumns(1, header.length);
 
