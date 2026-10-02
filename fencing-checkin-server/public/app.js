@@ -67,7 +67,7 @@ function renderFencer() {
     <div class="checkin-card">
       <div class="hint">Scan the QR code in the room, or enter your name and the code posted by your coach. This confirms you're actually here — your record can't be edited afterward.</div>
       <div class="field-row">
-        <div class="field"><label>Name</label><input id="fName" placeholder="Your full name" autocomplete="off"></div>
+        <div class="field"><label>Name</label><input id="fName" placeholder="First and last name" autocomplete="off"></div>
         <div class="field code"><label>Code</label><input id="fCode" placeholder="0000" inputmode="numeric" maxlength="4" value="${prefillCode}"></div>
       </div>
       <div class="suggestions" id="sugg"></div>
@@ -312,7 +312,8 @@ async function renderCoach() {
   document.getElementById('addFencerBtn').onclick = async () => {
     const v = document.getElementById('newFencerName').value.trim();
     if (!v) return;
-    await api('/api/coach/add-fencer', { method: 'POST', headers: coachHeaders(), body: JSON.stringify({ name: v }) });
+    const { ok, body } = await api('/api/coach/add-fencer', { method: 'POST', headers: coachHeaders(), body: JSON.stringify({ name: v }) });
+    if (!ok) { alert(body.error || 'Could not add fencer.'); return; }
     await refreshState(); renderCoach();
   };
   document.getElementById('dateInput').onchange = (e) => { coachSelectedDate = e.target.value; renderCoach(); };

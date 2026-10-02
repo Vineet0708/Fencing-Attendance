@@ -84,6 +84,14 @@ function currentStatusMap() {
   return map;
 }
 function displayAction(a) { return a === 'dnc' ? 'D.N.C.' : a; }
+// First and last word need 2+ letters each, so "Jacob" and "Jacob s" are rejected but
+// middle names/initials ("John A. Smith") and hyphens/apostrophes are fine.
+function isFullName(name) {
+  const parts = name.trim().split(/\s+/);
+  const letters = s => s.replace(/[^\p{L}]/gu, '').length;
+  return parts.length >= 2 && letters(parts[0]) >= 2 && letters(parts[parts.length - 1]) >= 2;
+}
+const FULL_NAME_MSG = 'Enter your first and last name.';
 async function closeStaleOpenSessions() {
   // Comparing UTC calendar dates here used to close out everyone still checked in the
   // moment UTC rolled over — which happens mid-evening, not at local midnight, so it
@@ -141,14 +149,21 @@ app.post('/api/checkin', async (req, res) => {
   await ensureConfig();
   await closeStaleOpenSessions();
   const { name, code } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ ok: false, msg: 'Enter your name.' });
+  if (!name || !isFullName(name)) return res.status(400).json({ ok: false, msg: FULL_NAME_MSG });
   if (!isValidCode(String(code || '').trim())) return res.status(400).json({ ok: false, msg: 'Incorrect or expired code.' });
 
   let fencer = data.roster.find(f => f.name.toLowerCase() === name.trim().toLowerCase());
   if (!fencer) { fencer = { id: slug(name), name: name.trim() }; data.roster.push(fencer); }
 
   const statusMap = currentStatusMap();
-  const isIn = statusMap[fencer.id]?.action === 'in';
+  // A repeat scan shortly after the last one is almost always someone double-tapping or
+  // re-scanning to "make sure" — toggling would check them right back in (or out).
+  const last = statusMap[fencer.id];
+  const repeatWindowMs = (Number(process.env.REPEAT_SCAN_MINUTES) || 5) * 60 * 1000;
+  if (last && (last.action === 'in' || last.action === 'out') && Date.now() - new Date(last.time).getTime() < repeatWindowMs) {
+    return res.json({ ok: true, msg: `Already checked ${last.action}, ${fencer.name}.`, action: last.action });
+  }
+  const isIn = last?.action === 'in';
   const action = isIn ? 'out' : 'in';
   const entry = { id: fencer.id, name: fencer.name, action, time: new Date().toISOString(), synced: false };
   data.log.unshift(entry);
@@ -197,7 +212,7 @@ app.delete('/api/coach/roster/:id', requireCoach, async (req, res) => {
 });
 app.post('/api/coach/add-fencer', requireCoach, async (req, res) => {
   const { name } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+  if (!name || !isFullName(name)) return res.status(400).json({ error: FULL_NAME_MSG });
   if (!data.roster.some(f => f.name.toLowerCase() === name.trim().toLowerCase())) {
     data.roster.push({ id: slug(name), name: name.trim() });
     await saveData();
