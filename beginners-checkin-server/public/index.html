@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beginners Class Check-In</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+/* Light counterpart of the main team app's dark theme. */
+:root{--bg:#F2EFE9;--surface:#FFFFFF;--surface-2:#E7E3DB;--border:#CFCAC0;--piste-line:#2E7A62;--on:#1E8A55;--on-dim:rgba(30,138,85,0.12);--off:#B5362E;--off-dim:rgba(181,54,46,0.10);--gold:#8F6F0E;--gold-dim:rgba(143,111,14,0.12);--text:#14181A;--text-dim:#4E5856;--text-faint:#6A7471;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;}
+.wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px;}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;flex-wrap:wrap;}
+.club{font-family:'Oswald',sans-serif;font-weight:600;font-size:15px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);}
+.club b{color:var(--gold);}
+.mode-link{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);cursor:pointer;border:1px solid var(--border);padding:8px 12px;border-radius:6px;}
+.mode-link:hover{border-color:var(--piste-line);color:var(--text-dim);}
+.scoreboard{display:flex;align-items:baseline;gap:10px;margin-bottom:20px;}
+.scoreboard .num{font-family:'Space Mono',monospace;font-weight:700;font-size:40px;color:var(--on);line-height:1;min-width:1.4ch;text-align:right;}
+.scoreboard .label{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-dim);}
+.checkin-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:26px;}
+.checkin-card .hint{font-size:12.5px;color:var(--text-faint);margin-bottom:14px;line-height:1.5;}
+.field-row{display:flex;gap:10px;flex-wrap:wrap;}
+.field{flex:1;min-width:160px;display:flex;flex-direction:column;gap:6px;}
+.field label{font-family:'Oswald',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);}
+.field input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 13px;color:var(--text);font-size:15px;outline:none;font-family:'Inter',sans-serif;}
+.field input:focus{border-color:var(--piste-line);}
+.field input.picked{border-color:var(--on);background:var(--on-dim);}
+.field.code input{font-family:'Space Mono',monospace;letter-spacing:.15em;max-width:140px;}
+.suggestions{display:flex;flex-wrap:wrap;gap:6px;}
+.suggestions:not(:empty){margin-top:4px;}
+.sugg{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:8px 14px;font-size:13.5px;cursor:pointer;color:var(--text);}
+.sugg:hover{border-color:var(--piste-line);background:var(--on-dim);}
+.sugg-none{font-size:12.5px;color:var(--text-faint);padding:6px 2px;}
+.submit-row{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap;}
+.submit-btn{background:var(--on);color:#fff;border:1px solid var(--on);border-radius:8px;padding:12px 22px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.msg{font-size:13.5px;}
+.msg.err{color:var(--off);}
+.msg.ok{color:var(--on);font-weight:600;}
+.section-label{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-faint);margin:0 0 4px;display:flex;align-items:center;gap:8px;}
+.section-label .dot{width:7px;height:7px;border-radius:50%;background:var(--gold);}
+.empty{color:var(--text-faint);font-size:14px;padding:16px 4px;font-style:italic;}
+.gate{max-width:340px;margin:60px auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:26px;text-align:center;}
+.gate h2{font-family:'Oswald',sans-serif;font-size:16px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 6px;}
+.gate p{color:var(--text-faint);font-size:12.5px;margin:0 0 16px;}
+.gate input{width:100%;text-align:center;letter-spacing:.3em;font-family:'Space Mono',monospace;font-size:20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;color:var(--text);margin-bottom:12px;}
+.gate button{width:100%;background:var(--gold-dim);color:var(--gold);border:1px solid var(--gold);border-radius:8px;padding:11px;font-family:'Oswald',sans-serif;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.verify-panel{background:var(--surface);border:1px solid var(--gold);border-radius:12px;padding:20px;margin-bottom:24px;}
+.verify-tabs{display:flex;gap:8px;margin-bottom:16px;}
+.verify-tabs button{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:9px;font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.verify-tabs button.active{background:var(--gold-dim);color:var(--gold);border-color:var(--gold);}
+.verify-body{display:flex;gap:20px;flex-wrap:wrap;align-items:center;}
+.verify-qr{background:#fff;border:1px solid var(--border);padding:10px;border-radius:8px;flex-shrink:0;line-height:0;width:162px;height:162px;}
+.verify-info{flex:1;min-width:200px;}
+.verify-info .code-num{font-family:'Space Mono',monospace;font-weight:700;font-size:30px;letter-spacing:.1em;color:var(--gold);margin-bottom:6px;}
+.verify-info .note{font-size:11.5px;color:var(--text-faint);line-height:1.5;margin-bottom:12px;}
+.verify-row{display:flex;gap:8px;flex-wrap:wrap;}
+.verify-row button,.verify-row select{background:var(--bg);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:9px 14px;font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px;}
+.panel .note{font-size:12px;color:var(--text-faint);line-height:1.5;}
+.panel .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-top:10px;}
+.panel input[type=text],.panel textarea{flex:1;min-width:220px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;font-family:'Inter',sans-serif;}
+.panel textarea{min-height:96px;resize:vertical;line-height:1.5;}
+.panel button{background:var(--bg);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:10px 14px;font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.panel button.primary{background:var(--on);border-color:var(--on);color:#fff;}
+.sync-status{font-size:12px;color:var(--text-dim);margin-top:8px;font-family:'Space Mono',monospace;min-height:1em;}
+.coach-toolbar{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center;}
+.coach-toolbar input[type=date]{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;color:var(--text);font-family:'Space Mono',monospace;font-size:13px;}
+.coach-toolbar input[type=text]{flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;}
+.coach-toolbar button{background:var(--surface);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:9px 14px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.table-scroll{overflow-x:auto;}
+table.roster-table{width:100%;border-collapse:collapse;margin-bottom:30px;}
+table.roster-table th{text-align:left;font-family:'Oswald',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);padding:8px 10px;border-bottom:1px solid var(--border);}
+table.roster-table td{padding:10px 10px;border-bottom:1px solid var(--surface-2);font-size:13.5px;}
+table.roster-table td.mono{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--text-dim);}
+.status-pill{display:inline-flex;align-items:center;gap:6px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.06em;text-transform:uppercase;}
+.status-pill .light{width:8px;height:8px;border-radius:50%;background:var(--border);}
+.status-pill.in{color:var(--on);}
+.status-pill.in .light{background:var(--on);}
+.status-pill.out{color:var(--text-faint);}
+.remove-x{color:var(--off);cursor:pointer;font-size:16px;}
+.modal-backdrop{position:fixed;inset:0;background:rgba(20,24,26,.45);display:flex;align-items:center;justify-content:center;z-index:50;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;max-width:320px;text-align:center;}
+.modal p{font-size:14px;margin:0 0 16px;}
+.modal .row{display:flex;gap:10px;}
+.modal button{flex:1;padding:10px;border-radius:8px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-dim);}
+.modal button.danger{border-color:var(--off);color:var(--off);background:var(--off-dim);}
+.status-bar{text-align:center;color:var(--text-faint);font-size:13px;padding:30px 0;}
+.present-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:100;}
+.present-screen .club-label{font-family:'Oswald',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);font-size:15px;}
+.present-screen .qr-box{background:#fff;border:1px solid var(--border);padding:22px;border-radius:16px;line-height:0;width:306px;height:306px;}
+.present-screen .sub{color:var(--text-dim);font-size:12.5px;font-family:'Space Mono',monospace;}
+.present-screen .exit-btn{position:absolute;top:18px;right:18px;background:var(--surface);border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:8px 14px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="status-bar">Loading…</div></div>
+<script src="/app.js"></script>
+</body>
+</html>

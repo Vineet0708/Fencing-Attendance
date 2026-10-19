@@ -1,0 +1,14 @@
+{
+  "name": "beginners-checkin-server",
+  "version": "1.0.0",
+  "description": "Attendance check-in for the beginners fencing class",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4"
+  }
+}
